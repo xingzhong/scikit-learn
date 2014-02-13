@@ -127,3 +127,5 @@ class TestPCFG(unittest.TestCase):
 
 	def testPattern1(self):
 		start = Nonterminal('S')
+
+	

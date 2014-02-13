@@ -5,7 +5,57 @@ from sklearn.mixture import log_multivariate_normal_density, sample_gaussian
 from sklearn.utils import check_random_state
 from scipy.misc import logsumexp
 from hashlib import sha1
+from nltk.parse.earleychart import ( IncrementalChartParser,
+                                    CompleterRule,
+                                    ScannerRule,
+                                    PredictorRule)
+from nltk.parse.chart import CachedTopDownPredictRule, Chart
+from nltk.parse.pchart import (ProbabilisticLeafEdge, 
+                                ProbabilisticTreeEdge,
+                                BottomUpProbabilisticChartParser)                              
 
+
+GAMMA = Nonterminal('GAMMA')
+
+class PredictorRule(CachedTopDownPredictRule):
+    pass
+
+class Parser(BottomUpProbabilisticChartParser):
+    def nbest_parse(self, tokens, n=None):
+        self._grammar.check_coverage(tokens)
+        chart = Chart(list(tokens))
+        grammar = self._grammar
+        
+        # Chart parser rules.
+        pr = PredictorRule()
+
+        # Our queue!
+        queue = []
+
+        nullEdge = ProbabilisticTreeEdge.from_production(
+                            Production(GAMMA, [S], prob=1.0),
+                            0, 1.0)
+        queue.append(nullEdge)
+        while len(queue) > 0:
+            edge = queue.pop()
+            queue.extend(pr.apply(chart, grammar, edge))
+            import pdb; pdb.set_trace()
+            
+
+        # Get a list of complete parses.
+        parses = chart.parses(grammar.start(), ProbabilisticTree)
+
+        # Assign probabilities to the trees.
+        prod_probs = {}
+        for prod in grammar.productions():
+            prod_probs[prod.lhs(), prod.rhs()] = prod.prob()
+        for parse in parses:
+            self._setprob(parse, prod_probs)
+
+        # Sort by probability
+        parses.sort(reverse=True, key=lambda tree: tree.prob())
+
+        return parses[:n]
 
 class Terminal(object):
     """ Terminal
@@ -42,7 +92,11 @@ class Production(WeightedProduction):
         return np.log(self.prob())
 
 class Grammar(WeightedGrammar):
-    pass
+    def check_coverage(self, tokens):
+        _, m = self._lexical_index.keys()[0].means.shape
+        _, n = tokens.shape
+        if m != n :
+            raise ValueError("Grammar does not cover the inputs dim")
 
 
 class PCFG(BaseEstimator):
@@ -156,7 +210,11 @@ class PCFG(BaseEstimator):
         """
         pass
 
+    
 
+    def parse(self, X):
+        p = Parser(self.grammar, trace=1)
+        p.nbest_parse(X)
 
 if __name__ == '__main__':
     S = Nonterminal('S')
@@ -181,5 +239,5 @@ if __name__ == '__main__':
     
     grammar = Grammar(S, prods)
     model = PCFG(grammar)
-    
-    import pdb; pdb.set_trace()
+    X = np.array([[0.0, 0.0], [0.0, 0.0], [0.0, 0.0] ])
+    model.parse(X)
