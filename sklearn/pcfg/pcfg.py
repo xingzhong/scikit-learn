@@ -9,16 +9,61 @@ from nltk.parse.earleychart import ( IncrementalChartParser,
                                     CompleterRule,
                                     ScannerRule,
                                     PredictorRule)
-from nltk.parse.chart import CachedTopDownPredictRule, Chart
-from nltk.parse.pchart import (ProbabilisticLeafEdge, 
-                                ProbabilisticTreeEdge,
+from nltk.parse.chart import TopDownPredictRule, Chart, AbstractChartRule, LeafEdge, TreeEdge
+from nltk.parse.pchart import ( ProbabilisticTreeEdge,
                                 BottomUpProbabilisticChartParser)                              
 
 
 GAMMA = Nonterminal('GAMMA')
 
-class PredictorRule(CachedTopDownPredictRule):
-    pass
+class ProbabilisticLeafEdge(LeafEdge):
+    def prob(self): return 1.0
+
+class ProbabilisticFundamentalRule(AbstractChartRule):
+    NUM_EDGES=0
+    def apply_iter(self, chart, grammar, left_edge, right_edge):
+        # Make sure the rule is applicable.
+        if not (left_edge.end() == right_edge.start() and
+                left_edge.next() == right_edge.lhs() and
+                left_edge.is_incomplete() and right_edge.is_complete()):
+            return
+
+        # Construct the new edge.
+        p = left_edge.prob() * right_edge.prob()
+        new_edge = ProbabilisticTreeEdge(p,
+                            span=(left_edge.start(), right_edge.end()),
+                            lhs=left_edge.lhs(), rhs=left_edge.rhs(),
+                            dot=left_edge.dot()+1)
+
+        # Add it to the chart, with appropriate child pointers.
+        changed_chart = False
+        for cpl1 in chart.child_pointer_lists(left_edge):
+            if chart.insert(new_edge, cpl1+(right_edge,)):
+                changed_chart = True
+
+        # If we changed the chart, then generate the edge.
+        if changed_chart: yield new_edge
+
+class ScannerRule(AbstractChartRule):
+    NUM_EDGES=1
+    def apply_iter(self, chart, grammar, edge, index=-1):
+        if isinstance(edge.next(), Terminal):
+            import pdb; pdb.set_trace()
+            logProb = edge.next().logP(np.atleast_2d( chart.leaf(index)) )[0][0]
+            new_edge = ProbabilisticTreeEdge.from_production(
+                Production(edge.next(), [index], prob=1.0), 
+                edge.end(), logProb)
+            if chart.insert(new_edge, ()):
+                yield new_edge
+
+class PredictorRule(TopDownPredictRule):
+    NUM_EDGES = 1
+    def apply_iter(self, chart, grammar, edge):
+        if edge.is_complete(): return
+        for prod in grammar.productions(lhs=edge.next()):
+            new_edge = ProbabilisticTreeEdge.from_production(prod, edge.end(), prod.prob())
+            if chart.insert(new_edge, ()):
+                yield new_edge
 
 class Parser(BottomUpProbabilisticChartParser):
     def nbest_parse(self, tokens, n=None):
@@ -28,6 +73,7 @@ class Parser(BottomUpProbabilisticChartParser):
         
         # Chart parser rules.
         pr = PredictorRule()
+        sc = ScannerRule()
 
         # Our queue!
         queue = []
@@ -36,9 +82,17 @@ class Parser(BottomUpProbabilisticChartParser):
                             Production(GAMMA, [S], prob=1.0),
                             0, 1.0)
         queue.append(nullEdge)
-        while len(queue) > 0:
-            edge = queue.pop()
-            queue.extend(pr.apply(chart, grammar, edge))
+        chart.insert(nullEdge, ())
+        for (i, token) in enumerate(tokens):
+            for edge in chart.iteredges():
+                queue.extend(pr.apply(chart, grammar, edge))
+            for edge in chart.iteredges():
+                queue.extend(sc.apply(chart, grammar, edge, i))
+            
+            if self._trace > 0:
+                for edge in chart.iteredges():
+                    print('  %-50s [%s]' % (chart.pp_edge(edge,width=2),
+                                        edge.prob()))
             import pdb; pdb.set_trace()
             
 
@@ -90,6 +144,7 @@ class Production(WeightedProduction):
     def logprob(self):
         # use natural log instead log2 in nltk
         return np.log(self.prob())
+
 
 class Grammar(WeightedGrammar):
     def check_coverage(self, tokens):
