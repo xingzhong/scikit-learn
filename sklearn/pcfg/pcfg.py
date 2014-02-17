@@ -12,9 +12,80 @@ from nltk.parse.earleychart import ( IncrementalChartParser,
 from nltk.parse.chart import TopDownPredictRule, Chart, AbstractChartRule, LeafEdge, TreeEdge
 from nltk.parse.pchart import ( ProbabilisticTreeEdge,
                                 BottomUpProbabilisticChartParser)                              
-
+from nltk.tree import Tree, ProbabilisticTree
 
 GAMMA = Nonterminal('GAMMA')
+
+class Sample(int):
+    def __repr__(self):
+        return "S[%s]"%str(self)
+
+class ChartI(Chart):
+    def _trees(self, edge, complete, memo, tree_class):
+        # If we've seen this edge before, then reuse our old answer.
+        if edge in memo:
+            return memo[edge]
+
+        trees = []
+
+        # when we're reading trees off the chart, don't use incomplete edges
+        if complete and edge.is_incomplete():
+            return trees
+
+        # Until we're done computing the trees for edge, set
+        # memo[edge] to be empty.  This has the effect of filtering
+        # out any cyclic trees (i.e., trees that contain themselves as
+        # descendants), because if we reach this edge via a cycle,
+        # then it will appear that the edge doesn't generate any
+        # trees.
+        memo[edge] = []
+
+        # Leaf edges.
+
+        if isinstance(edge.lhs(), Terminal):
+            #import pdb; pdb.set_trace()
+            #leaf = self._tokens[edge.start()]
+            leaf = np.array_str(self._tokens[edge.start()], precision=3, max_line_width=6)
+            t = tree_class(edge.lhs(), [leaf])
+            t.set_logProb(edge.logProb())
+            memo[edge] = [t]
+            return [t]
+
+        # Each child pointer list can be used to form trees.
+        for cpl in self.child_pointer_lists(edge):
+            # Get the set of child choices for each child pointer.
+            # child_choices[i] is the set of choices for the tree's
+            # ith child.
+            child_choices = [self._trees(cp, complete, memo, tree_class)
+                             for cp in cpl]
+
+            # For each combination of children, add a tree.
+            for children in self._choose_children(child_choices):
+                lhs = edge.lhs().symbol()
+                trees.append(tree_class(lhs, children))
+
+        # If the edge is incomplete, then extend it with "partial trees":
+        if edge.is_incomplete():
+            unexpanded = [tree_class(elt,[])
+                          for elt in edge.rhs()[edge.dot():]]
+            for tree in trees:
+                tree.extend(unexpanded)
+
+        # Update the memoization dictionary.
+        memo[edge] = trees
+
+        # Return the list of trees.
+        return trees
+
+class ProbabilisticTreeI(ProbabilisticTree):
+    def __init__(self, *args, **kwargs):
+        ProbabilisticTree.__init__(self, *args, **kwargs)
+        self._logProb = None 
+    def logProb(self):
+        return self._logProb
+    def set_logProb(self, x):
+        self._logProb = x
+        self.set_prob(np.exp(x))
 
 class ProbabilisticTreeEdgeI(TreeEdge):
     def __init__(self, logProb, *args, **kwargs):
@@ -24,6 +95,12 @@ class ProbabilisticTreeEdgeI(TreeEdge):
     def __cmp__(self, other):
         if self._logProb != other.logProb(): return -1
         return TreeEdge.__cmp__(self, other)
+
+    def move_dot_forward(self, new_end):
+        return ProbabilisticTreeEdgeI(self._logProb, 
+                        span=(self._span[0], new_end),
+                        lhs=self._lhs, rhs=self._rhs,
+                        dot=self._dot+1)
 
     def prob(self): return np.exp(self._logProb)
     def logProb(self): return self._logProb
@@ -40,6 +117,7 @@ class ProbabilisticLeafEdgeI(LeafEdge):
 class ProbabilisticFundamentalRule(AbstractChartRule):
     NUM_EDGES=0
     def apply_iter(self, chart, grammar, left_edge, right_edge):
+        #import pdb; pdb.set_trace()
         # Make sure the rule is applicable.
         if not (left_edge.end() == right_edge.start() and
                 left_edge.next() == right_edge.lhs() and
@@ -47,8 +125,8 @@ class ProbabilisticFundamentalRule(AbstractChartRule):
             return
 
         # Construct the new edge.
-        p = left_edge.prob() * right_edge.prob()
-        new_edge = ProbabilisticTreeEdgeI(p,
+        logP = left_edge.logProb() + right_edge.logProb()
+        new_edge = ProbabilisticTreeEdgeI(logP,
                             span=(left_edge.start(), right_edge.end()),
                             lhs=left_edge.lhs(), rhs=left_edge.rhs(),
                             dot=left_edge.dot()+1)
@@ -69,14 +147,7 @@ class SingleCompleteRule(AbstractChartRule):
 
     def apply_iter(self, chart, grammar, edge1):
         fr = self._fundamental_rule
-        if edge1.is_incomplete():
-            # edge1 = left_edge; edge2 = right_edge
-            for edge2 in chart.select(start=edge1.end(), is_complete=True,
-                                     lhs=edge1.next()):
-                for new_edge in fr.apply_iter(chart, grammar, edge1, edge2):
-                    yield new_edge
-        else:
-            # edge2 = left_edge; edge1 = right_edge
+        if edge1.is_complete():
             for edge2 in chart.select(end=edge1.start(), is_complete=False,
                                      next=edge1.lhs()):
                 for new_edge in fr.apply_iter(chart, grammar, edge2, edge1):
@@ -88,13 +159,14 @@ class ScannerRule(AbstractChartRule):
     NUM_EDGES=1
     def apply_iter(self, chart, grammar, edge, index=-1):
         if isinstance(edge.next(), Terminal):
-            #import pdb; pdb.set_trace()
             logProb = edge.next().logP(np.atleast_2d( chart.leaf(index)) )[0][0]
             new_edge = ProbabilisticTreeEdgeI.from_production(
-                Production(edge.next(), [index], prob=1.0), 
-                edge.end(), logProb)
-            new_edge._dot += 1
+                Production(edge.next(), [Sample(index)], prob=1.0), 
+                index, logProb)
+            new_edge = new_edge.move_dot_forward(index+1)
             if chart.insert(new_edge, ()):
+                print('[posterior]  %-50s [%.4f]' % (chart.pp_edge(new_edge,width=2),
+                                    new_edge.logProb()))
                 yield new_edge
 
 class PredictorRule(TopDownPredictRule):
@@ -105,12 +177,36 @@ class PredictorRule(TopDownPredictRule):
             new_edge = ProbabilisticTreeEdgeI.from_production(
                 prod, edge.end(), prod.logProb())
             if chart.insert(new_edge, ()):
+                print('[prior    ]  %-50s [%.4f]' % (chart.pp_edge(new_edge,width=2),
+                                    new_edge.logProb()))
                 yield new_edge
 
 class Parser(BottomUpProbabilisticChartParser):
+    def _setLogProb(self, tree, prod_probs):
+        if tree.logProb() is not None: return 
+        
+        # Get the prob of the CFG production.
+        lhs = Nonterminal(tree.node)
+        rhs = []
+        for child in tree:
+            if isinstance(child, Tree):
+                rhs.append(Nonterminal(child.node))
+            else:
+                rhs.append(child)
+        
+        logProb = np.log(prod_probs[lhs, tuple(rhs)])
+
+        # Get the probs of children.
+        for child in tree:
+            if isinstance(child, Tree):
+                self._setLogProb(child, prod_probs)
+                logProb += child.logProb()
+
+        tree.set_logProb(logProb)
+
     def nbest_parse(self, tokens, n=None):
         self._grammar.check_coverage(tokens)
-        chart = Chart(list(tokens))
+        chart = ChartI(list(tokens))
         grammar = self._grammar
         
         # Chart parser rules.
@@ -122,37 +218,47 @@ class Parser(BottomUpProbabilisticChartParser):
         queue = []
 
         nullEdge = ProbabilisticTreeEdgeI.from_production(
-                            Production(GAMMA, [S], prob=1.0),
+                            Production(GAMMA, [self._grammar.start()], prob=1.0),
                             0, 0.0)
         queue.append(nullEdge)
         chart.insert(nullEdge, ())
         for (i, token) in enumerate(tokens):
-            for edge in chart.iteredges():
+
+            for edge in chart.select(end=i):
                 queue.extend(cl.apply(chart, grammar, edge))
-            for edge in chart.iteredges():
+            for edge in chart.select(end=i):
                 queue.extend(pr.apply(chart, grammar, edge))
-            for edge in chart.iteredges():
+            for edge in chart.select(end=i):
                 queue.extend(sc.apply(chart, grammar, edge, i))
             
             if self._trace > 0:
-                for edge in chart.iteredges():
-                    print('  %-50s [%s]' % (chart.pp_edge(edge,width=2),
-                                        edge.logProb()))
-            import pdb; pdb.set_trace()
+                print "="*25+str(i)+"="*25
+                #for edge in chart.select(end=i):
+                #    print('  %-50s [%s]' % (chart.pp_edge(edge,width=2),
+                #                        edge.logProb()))
             
-
+        for edge in chart.select(end=i+1):
+            queue.extend(cl.apply(chart, grammar, edge))
+        
+        if self._trace > 0:
+            print "="*25+str(i+1)+"="*25
+            #for edge in chart.select(end=i+1):
+            #    print('  %-50s [%.4f]' % (chart.pp_edge(edge,width=2),
+            #                        edge.logProb()))
+        
         # Get a list of complete parses.
-        parses = chart.parses(grammar.start(), ProbabilisticTree)
-
+        parses = chart.parses(self._grammar.start(), ProbabilisticTreeI)
+        
         # Assign probabilities to the trees.
         prod_probs = {}
         for prod in grammar.productions():
             prod_probs[prod.lhs(), prod.rhs()] = prod.prob()
+        
         for parse in parses:
-            self._setprob(parse, prod_probs)
-
+            self._setLogProb(parse, prod_probs)
+        #import pdb; pdb.set_trace()
         # Sort by probability
-        parses.sort(reverse=True, key=lambda tree: tree.prob())
+        parses.sort(reverse=True, key=lambda tree: tree.logProb())
 
         return parses[:n]
 
@@ -170,11 +276,14 @@ class Terminal(object):
     def logP(self, x):
         return log_multivariate_normal_density(x, self.means, self.covars)
 
+    def symbol(self):
+        return self
+
     def __str__(self):
-        return "T[%s]"%self.means
+        return "Gau[%s]"%np.array_str(self.means.ravel(), precision=3)
 
     def __repr__(self):
-        return "T[%s]"%self.means
+        return "Gau[%s]"%np.array_str(self.means.ravel(), precision=3)
 
     def __hash__(self):
         means = sha1(self.means.view(np.uint8)).hexdigest()
@@ -296,27 +405,16 @@ class PCFG(BaseEstimator):
         if random_state is None:
             random_state = self.random_state
         random_state = check_random_state(random_state)
-        
-
         return self._sample(self.grammar.start())[:n_samples, :]
-
-    def prior(self, X):
-        """Predict the prior probability 
-            of the next nonterminal and observation based on current observations
-        Parameters
-        ----------
-        X : array_like, shape (n_samples, n_features)
-            List of observation samples
-        """
-        pass
-
-    
 
     def parse(self, X):
         p = Parser(self.grammar, trace=1)
-        p.nbest_parse(X)
+        parses = p.nbest_parse(X)
+        return parses
+        
 
 if __name__ == '__main__':
+    np.set_printoptions(precision=4)
     S = Nonterminal('S')
     NT1 = Nonterminal('NT1')
     NT2 = Nonterminal('NT2')
@@ -339,5 +437,10 @@ if __name__ == '__main__':
     
     grammar = Grammar(S, prods)
     model = PCFG(grammar)
-    X = np.array([[0.0, 0.0], [0.0, 0.0], [0.0, 0.0] ])
-    model.parse(X)
+    X = np.array([[0.0, 0.0], [1.0, 1.0], [2.0, 2.0], [3.0, 3.0], [4.0, 4.0], [5.0, 5.0] ])
+    X = np.random.randn(8,2)
+    parses = model.parse(X)
+    #import pdb; pdb.set_trace()
+    #from nltk.draw.tree import draw_trees
+    #print '  please wait...'
+    #draw_trees(*parses)

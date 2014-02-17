@@ -125,7 +125,32 @@ class TestPCFG(unittest.TestCase):
 		assert_equals( n, 2)
 		assert_true( n > 0 and n < 10 )
 
-	def testPattern1(self):
-		start = Nonterminal('S')
+	def testParse(self):
+		S = Nonterminal('S')
+		NT1 = Nonterminal('NT1')
+		NT2 = Nonterminal('NT2')
+		NT3 = Nonterminal('NT3')
+		NT4 = Nonterminal('NT4')
+		NT5 = Nonterminal('NT5')
+		t1 = Terminal(np.array([[1.0, 1.0]]), np.array([[1.0, 1.0]]))
+		t2 = Terminal(np.array([[0.0, 0.0]]), np.array([[1.0, 1.0]]))
+		t3 = Terminal(np.array([[-1.0, -1.0]]), np.array([[1.0, 1.0]]))
+		prods = [ Production(S, [S, NT1], prob=0.8) ]
+		prods.append(Production(S, [NT2, NT3], prob=0.2) )
+		prods.append(Production(NT1, [NT2, NT3], prob=1.0))
+		prods.append(Production(NT2, [NT4, NT5], prob=1.0))
+		prods.append(Production(NT3, [t3, NT3], prob=0.8))
+		prods.append(Production(NT3, [t3, t3], prob=0.2))
+		prods.append(Production(NT4, [t1, NT4], prob=0.8))
+		prods.append(Production(NT4, [t1, t1], prob=0.2))
+		prods.append(Production(NT5, [t2, NT5], prob=0.8))
+		prods.append(Production(NT5, [t2, t2], prob=0.2))
 
+		grammar = Grammar(S, prods)
+		model = PCFG(grammar)
+		X = np.random.randn(10,2)
+		parses = model.parse(X)
+		for parse in parses:
+			assert_equals(len(parse.leaves()), 10)
+			assert_true(np.isfinite(parse.logProb()))
 	
