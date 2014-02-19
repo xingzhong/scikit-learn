@@ -148,7 +148,7 @@ class TestPCFG(unittest.TestCase):
 
 		grammar = Grammar(S, prods)
 		model = PCFG(grammar)
-		X = np.random.randn(10,2)
+		X = np.random.randn(20,2)
 		parses = model.parse(X)
 		for parse in parses:
 			assert_equals(len(parse.leaves()), 10)
