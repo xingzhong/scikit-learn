@@ -21,6 +21,16 @@ class Sample(int):
         return "S[%s]"%str(self)
 
 class ChartI(Chart):
+    def delete(self, edge):
+        self._edges.remove(edge)
+        #self._edge_to_cpls.pop(edge, None)
+        for subdict in self._indexes.values():
+            for edges in subdict.values():
+                try:
+                    edges.remove(edge)
+                except ValueError:
+                    pass
+        
     def _trees(self, edge, complete, memo, tree_class):
         # If we've seen this edge before, then reuse our old answer.
         if edge in memo:
@@ -126,11 +136,14 @@ class ProbabilisticFundamentalRule(AbstractChartRule):
 
         # Construct the new edge.
         logP = left_edge.logProb() + right_edge.logProb()
+
+        #if logP < -50.0:
+        #    return 
+
         new_edge = ProbabilisticTreeEdgeI(logP,
                             span=(left_edge.start(), right_edge.end()),
                             lhs=left_edge.lhs(), rhs=left_edge.rhs(),
                             dot=left_edge.dot()+1)
-
         # Add it to the chart, with appropriate child pointers.
         changed_chart = False
         for cpl1 in chart.child_pointer_lists(left_edge):
@@ -146,11 +159,15 @@ class SingleCompleteRule(AbstractChartRule):
     def apply_iter(self, chart, grammar, edge1):
         fr = self._fundamental_rule
         if edge1.is_complete():
-            for edge2 in chart.select(end=edge1.start(), is_complete=False,
-                                     next=edge1.lhs()):
+            for edge2 in chart.select(end=edge1.start(), 
+                                        is_complete=False,
+                                        next=edge1.lhs()):
+                #print('[complete]  %-50s [%.4f]' % (chart.pp_edge(edge2,width=2),
+                #                    edge2.logProb()))
                 # FIXME: This loop is too heavy  
                 for new_edge in fr.apply_iter(chart, grammar, edge2, edge1):
-                    yield new_edge
+                    yield (new_edge, edge2, edge1)
+
 
     def __str__(self): return 'Fundamental Rule'
 
@@ -227,33 +244,45 @@ class Parser(BottomUpProbabilisticChartParser):
 
             for edge in chart.select(end=i, is_incomplete=True):
                 pr.apply(chart, grammar, edge)
-            if self._trace == 1:
-                print '='*20 + "round %s after prediction edge num %s"%(i, chart.num_edges())
             for edge in chart.select(end=i, is_incomplete=True):
                 sc.apply(chart, grammar, edge, i)
-            if self._trace == 1:
-                print '='*20 + "round %s after scan edge num %s"%(i, chart.num_edges())
             #for edge in chart.select(end=i+1):
+
             for edge in chart.select(end=i+1, is_complete=True):
                 cl.apply(chart, grammar, edge)
-            if self._trace == 1:
-                print '='*20 + "round %s after complete edge num %s"%(i, chart.num_edges())
-            
-            
 
+
+            #for nt in grammar._categories.union([GAMMA]):
+            #    edges = [e for e in chart.select(end=i+1, is_complete=True, lhs=nt)]
+            #    if len(edges) > 10:
+            #        edges = sorted(edges, key=lambda x: x.logProb())
+            #        for edge in edges[:-10]:
+            #            print('[delete]  %-50s [%s]' % (chart.pp_edge(edge,width=2),
+            #                            edge.logProb()))
+            #            chart.delete(edge)
+
+            
             if self._trace > 1:
                 print "="*25+"Prior     "+str(i)+"="*25
                 for edge in chart.select(end=i, is_incomplete=True):
                     print('  %-50s [%s]' % (chart.pp_edge(edge,width=2),
                                         edge.logProb()))
                 print "="*25+"Posterior "+str(i)+"="*25
-                for edge in chart.select(end=i+1, is_incomplete=False):
+                #for edge in chart.select(end=i+1, is_complete=True):
+                for edge in chart.select(end=i+1):
                     print('  %-50s [%s]' % (chart.pp_edge(edge,width=2),
                                         edge.logProb()))
-        import pdb; pdb.set_trace()
+                print "="*25+"char edges "+str(chart.num_edges())+"="*25
+            
+            import pdb;pdb.set_trace()
         # Get a list of complete parses.
         parses = chart.parses(self._grammar.start(), ProbabilisticTreeI)
         
+        for edge in chart.select(end=i+1, lhs=GAMMA):
+            chart._edges.remove(edge)
+            #print('  %-50s [%s]' % (chart.pp_edge(edge,width=2),
+            #                            edge.logProb()))
+        #import pdb;pdb.set_trace()
         # Assign probabilities to the trees.
         prod_probs = {}
         for prod in grammar.productions():
@@ -263,8 +292,11 @@ class Parser(BottomUpProbabilisticChartParser):
             self._setLogProb(parse, prod_probs)
         #import pdb; pdb.set_trace()
         # Sort by probability
-        parses.sort(reverse=True, key=lambda tree: tree.logProb())
 
+        print "total parse trees", len(parses)
+
+        parses.sort(reverse=True, key=lambda tree: tree.logProb())
+        
         return parses[:n]
 
 class Terminal(object):
