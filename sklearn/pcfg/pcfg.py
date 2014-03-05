@@ -13,6 +13,7 @@ from nltk.parse.chart import TopDownPredictRule, Chart, AbstractChartRule, LeafE
 from nltk.parse.pchart import ( ProbabilisticTreeEdge,
                                 BottomUpProbabilisticChartParser)                              
 from nltk.tree import Tree, ProbabilisticTree
+from collections import Counter
 
 GAMMA = Nonterminal('GAMMA')
 
@@ -90,7 +91,8 @@ class ChartI(Chart):
 class ProbabilisticTreeI(ProbabilisticTree):
     def __init__(self, *args, **kwargs):
         ProbabilisticTree.__init__(self, *args, **kwargs)
-        self._logProb = None 
+        self._logProb = None
+        
     def logProb(self):
         return self._logProb
     def set_logProb(self, x):
@@ -101,6 +103,8 @@ class ProbabilisticTreeEdgeI(TreeEdge):
     def __init__(self, logProb, *args, **kwargs):
         TreeEdge.__init__(self, *args, **kwargs)
         self._logProb = logProb
+        self._alpha = 0  # forward 
+        self._gamma = 0   # inner
     
     def __cmp__(self, other):
         if self._logProb != other.logProb(): return -1
@@ -137,13 +141,12 @@ class ProbabilisticFundamentalRule(AbstractChartRule):
         # Construct the new edge.
         logP = left_edge.logProb() + right_edge.logProb()
 
-        #if logP < -50.0:
-        #    return 
-
         new_edge = ProbabilisticTreeEdgeI(logP,
                             span=(left_edge.start(), right_edge.end()),
                             lhs=left_edge.lhs(), rhs=left_edge.rhs(),
                             dot=left_edge.dot()+1)
+        new_edge._alpha = left_edge._alpha + right_edge._gamma
+        new_edge._gamma = left_edge._gamma + right_edge._gamma
         # Add it to the chart, with appropriate child pointers.
         changed_chart = False
         for cpl1 in chart.child_pointer_lists(left_edge):
@@ -159,11 +162,11 @@ class SingleCompleteRule(AbstractChartRule):
     def apply_iter(self, chart, grammar, edge1):
         fr = self._fundamental_rule
         if edge1.is_complete():
-            for edge2 in chart.select(end=edge1.start(), 
+            edges = [edge for edge in chart.select(end=edge1.start(), 
                                         is_complete=False,
-                                        next=edge1.lhs()):
-                #print('[complete]  %-50s [%.4f]' % (chart.pp_edge(edge2,width=2),
-                #                    edge2.logProb()))
+                                        next=edge1.lhs())]
+
+            for edge2 in sorted(edges, key=lambda x:x._alpha, reverse=True)[:10]:
                 # FIXME: This loop is too heavy  
                 for new_edge in fr.apply_iter(chart, grammar, edge2, edge1):
                     yield (new_edge, edge2, edge1)
@@ -180,6 +183,8 @@ class ScannerRule(AbstractChartRule):
                 Production(edge.next(), [Sample(index)], prob=1.0), 
                 index, logProb)
             new_edge = new_edge.move_dot_forward(index+1)
+            new_edge._alpha = edge._alpha
+            new_edge._gamma = edge._gamma
             if chart.insert(new_edge, ()):
                 #print('[posterior]  %-50s [%.4f]' % (chart.pp_edge(new_edge,width=2),
                 #                    new_edge.logProb()))
@@ -192,10 +197,12 @@ class PredictorRule(TopDownPredictRule):
         for prod in grammar.productions(lhs=edge.next()):
             new_edge = ProbabilisticTreeEdgeI.from_production(
                 prod, edge.end(), prod.logProb())
-            #print('[prior    ]  %-50s [%.4f]' % (chart.pp_edge(new_edge,width=2),
-                                    #new_edge.logProb()))
-            #print('[priorfrom]  %-50s [%.4f]' % (chart.pp_edge(edge,width=2),
-                                   #edge.logProb()))
+            new_edge._alpha = edge._alpha + new_edge.logProb()
+            new_edge._gamma = new_edge.logProb()
+            #print('[prior    ]  %-50s [%.4f] [%.4f] [%.4f]' % (chart.pp_edge(new_edge,width=2),
+            #                        new_edge.logProb(), new_edge._alpha, new_edge._gamma))
+            #print('[priorfrom]  %-50s [%.4f] [%.4f] [%.4f]' % (chart.pp_edge(edge,width=2),
+            #                        edge.logProb(), edge._alpha, edge._gamma))
             if chart.insert(new_edge, ()):
                 yield new_edge
 
@@ -240,10 +247,25 @@ class Parser(BottomUpProbabilisticChartParser):
                             0, 0.0)
         #queue.append(nullEdge)
         chart.insert(nullEdge, ())
+        expectations = []
         for (i, token) in enumerate(tokens):
 
             for edge in chart.select(end=i, is_incomplete=True):
                 pr.apply(chart, grammar, edge)
+
+            predict = Counter()
+            for edge in chart.select(end=i, is_incomplete=True):
+                if isinstance(edge.next(), Terminal):
+                    predict[edge.next()] += np.exp(edge._alpha)
+
+            normalize = sum(predict.values())
+            expectation = 0
+            print 
+            for k,v in predict.iteritems():
+                print k, v, v/normalize
+                expectation += v/normalize * k.means
+            expectations.append(expectation.ravel())
+
             for edge in chart.select(end=i, is_incomplete=True):
                 sc.apply(chart, grammar, edge, i)
             #for edge in chart.select(end=i+1):
@@ -261,20 +283,21 @@ class Parser(BottomUpProbabilisticChartParser):
             #                            edge.logProb()))
             #            chart.delete(edge)
 
+
             
             if self._trace > 1:
                 print "="*25+"Prior     "+str(i)+"="*25
                 for edge in chart.select(end=i, is_incomplete=True):
-                    print('  %-50s [%s]' % (chart.pp_edge(edge,width=2),
-                                        edge.logProb()))
+                    print('%-50s [%.4f] [%.4f] [%.4f]' % (chart.pp_edge(edge,width=2),
+                                    edge.logProb(), edge._alpha, edge._gamma))
                 print "="*25+"Posterior "+str(i)+"="*25
                 #for edge in chart.select(end=i+1, is_complete=True):
                 for edge in chart.select(end=i+1):
-                    print('  %-50s [%s]' % (chart.pp_edge(edge,width=2),
-                                        edge.logProb()))
+                    print('%-50s [%.4f] [%.4f] [%.4f]' % (chart.pp_edge(edge,width=2),
+                                    edge.logProb(), edge._alpha, edge._gamma))
                 print "="*25+"char edges "+str(chart.num_edges())+"="*25
             
-            import pdb;pdb.set_trace()
+            #import pdb;pdb.set_trace()
         # Get a list of complete parses.
         parses = chart.parses(self._grammar.start(), ProbabilisticTreeI)
         
@@ -297,7 +320,7 @@ class Parser(BottomUpProbabilisticChartParser):
 
         parses.sort(reverse=True, key=lambda tree: tree.logProb())
         
-        return parses[:n]
+        return parses[:n], expectations
 
 class Terminal(object):
     """ Terminal
@@ -446,8 +469,8 @@ class PCFG(BaseEstimator):
 
     def parse(self, X, n=None, trace=None):
         p = Parser(self.grammar, trace=trace)
-        parses = p.nbest_parse(X, n=n)
-        return parses
+        parses, expectations = p.nbest_parse(X, n=n)
+        return parses, np.array(expectations)
         
 
 if __name__ == '__main__':
