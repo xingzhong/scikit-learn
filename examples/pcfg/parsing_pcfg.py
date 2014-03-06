@@ -13,26 +13,27 @@ from sklearn.pcfg import PCFG, Production, Terminal, Grammar, Nonterminal
 from nltk.draw.tree import draw_trees
 
 
-TEST_N = 30
+TEST_N = 20
 
 def sample_grammar3():
     S = Nonterminal('S')
-    NT1 = Nonterminal('NT1')
-    NT2 = Nonterminal('NT2')
-    NT3 = Nonterminal('NT3')
-    NT4 = Nonterminal('NT4')
-    NT5 = Nonterminal('NT5')
+    NT1 = Nonterminal('NT_left')
+    NT2 = Nonterminal('NT_llow')
+    NT3 = Nonterminal('NT_right')
+    NT4 = Nonterminal('NT_high')
     
     mid = Terminal(np.array([[0.5, 0.5]]), np.array([[.2, 10.0]]))
-    high = Terminal(np.array([[1.0, 1.0]]), np.array([[.2, 10.0]]))
-    low = Terminal(np.array([[0.0, 0.0]]), np.array([[.2, 10.0]]))
+    high = Terminal(np.array([[.7, .7]]), np.array([[1, 10.0]]))
+    low = Terminal(np.array([[.3, .3]]), np.array([[1, 10.0]]))
     prods = [ ]
-    prods.append(Production(S, [NT1, NT2], prob=1.0))
-    prods.append(Production(NT1, [NT2, NT4], prob=1.0))
+    prods.append(Production(S, [NT2, NT4, NT2], prob=1.0))
+    #prods.append(Production(NT1, [NT2, NT4], prob=1.0))
     prods.append(Production(NT2, [NT2, NT2], prob=0.5))
     prods.append(Production(NT2, [low, low], prob=0.5))
     prods.append(Production(NT4, [NT4, NT4], prob=0.5))
     prods.append(Production(NT4, [high, high], prob=0.5))
+    #prods.append(Production(NT3, [NT3, NT3], prob=0.5))
+    #prods.append(Production(NT3, [low, low], prob=0.5))
     
 
     return Grammar(S, prods)
@@ -83,14 +84,17 @@ def sample_grammar():
 def sample_series():
     from pandas.io.data import DataReader
     import datetime
-    start = datetime.datetime(2014, 1, 1)
+    start = datetime.datetime(2013, 2, 15)
     end = datetime.datetime(2014, 2, 20)
     df = DataReader('vxx', 'yahoo', start, end)
     X = np.atleast_2d(df[['Adj Close', 'Volume']].values)
     #import pdb; pdb.set_trace()
     return X[:TEST_N, :]
     sample = np.zeros((TEST_N,2))
-    sample[20] = np.array([1.0, 1.0])
+    sample[4,:] = np.array([1.0, 1.0])
+    sample[5,:] = np.array([1.0, 1.0])
+    sample[6,:] = np.array([1.0, 1.0])
+    sample[7,:] = np.array([1.0, 1.0])
     #import pdb; pdb.set_trace()
     return sample
 
