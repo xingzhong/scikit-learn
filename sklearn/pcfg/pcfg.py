@@ -183,8 +183,8 @@ class ScannerRule(AbstractChartRule):
                 Production(edge.next(), [Sample(index)], prob=1.0), 
                 index, logProb)
             new_edge = new_edge.move_dot_forward(index+1)
-            new_edge._alpha = edge._alpha
-            new_edge._gamma = edge._gamma
+            new_edge._alpha = edge._alpha + logProb
+            new_edge._gamma = edge._gamma + logProb
             if chart.insert(new_edge, ()):
                 #print('[posterior]  %-50s [%.4f]' % (chart.pp_edge(new_edge,width=2),
                 #                    new_edge.logProb()))
@@ -297,7 +297,7 @@ class Parser(BottomUpProbabilisticChartParser):
                                     edge.logProb(), edge._alpha, edge._gamma))
                 print "="*25+"char edges "+str(chart.num_edges())+"="*25
             
-            #import pdb;pdb.set_trace()
+            import pdb;pdb.set_trace()
         # Get a list of complete parses.
         parses = chart.parses(self._grammar.start(), ProbabilisticTreeI)
         
