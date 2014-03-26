@@ -260,9 +260,9 @@ class Parser(BottomUpProbabilisticChartParser):
 
             normalize = sum(predict.values())
             expectation = 0
-            print 
+            #print 
             for k,v in predict.iteritems():
-                print k, v, v/normalize
+                #print k, v, v/normalize
                 expectation += v/normalize * k.means
             expectations.append(expectation.ravel())
 
