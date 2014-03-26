@@ -159,14 +159,14 @@ class ProbabilisticFundamentalRule(AbstractChartRule):
 class SingleCompleteRule(AbstractChartRule):
     NUM_EDGES=1
     _fundamental_rule = ProbabilisticFundamentalRule()
-    def apply_iter(self, chart, grammar, edge1):
+    def apply_iter(self, chart, grammar, edge1, trim):
         fr = self._fundamental_rule
         if edge1.is_complete():
             edges = [edge for edge in chart.select(end=edge1.start(), 
                                         is_complete=False,
                                         next=edge1.lhs())]
 
-            for edge2 in sorted(edges, key=lambda x:x._alpha, reverse=True)[:10]:
+            for edge2 in sorted(edges, key=lambda x:x._alpha, reverse=True)[:trim]:
                 # FIXME: This loop is too heavy  
                 for new_edge in fr.apply_iter(chart, grammar, edge2, edge1):
                     yield (new_edge, edge2, edge1)
@@ -229,7 +229,7 @@ class Parser(BottomUpProbabilisticChartParser):
 
         tree.set_logProb(logProb)
 
-    def nbest_parse(self, tokens, n=None):
+    def nbest_parse(self, tokens, n=None, trim=10):
         self._grammar.check_coverage(tokens)
         chart = ChartI(list(tokens))
         grammar = self._grammar
@@ -271,7 +271,7 @@ class Parser(BottomUpProbabilisticChartParser):
             #for edge in chart.select(end=i+1):
 
             for edge in chart.select(end=i+1, is_complete=True):
-                cl.apply(chart, grammar, edge)
+                cl.apply(chart, grammar, edge, trim)
 
 
             #for nt in grammar._categories.union([GAMMA]):
@@ -467,9 +467,9 @@ class PCFG(BaseEstimator):
         random_state = check_random_state(random_state)
         return self._sample(self.grammar.start())[:n_samples, :]
 
-    def parse(self, X, n=None, trace=None):
+    def parse(self, X, n=None, trim=10, trace=None):
         p = Parser(self.grammar, trace=trace)
-        parses, expectations = p.nbest_parse(X, n=n)
+        parses, expectations = p.nbest_parse(X, n=n, trim=trim)
         return parses, np.array(expectations)
         
 
