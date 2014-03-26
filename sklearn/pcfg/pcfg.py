@@ -297,7 +297,7 @@ class Parser(BottomUpProbabilisticChartParser):
                                     edge.logProb(), edge._alpha, edge._gamma))
                 print "="*25+"char edges "+str(chart.num_edges())+"="*25
             
-            import pdb;pdb.set_trace()
+            #import pdb;pdb.set_trace()
         # Get a list of complete parses.
         parses = chart.parses(self._grammar.start(), ProbabilisticTreeI)
         
