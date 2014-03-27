@@ -379,6 +379,37 @@ class PCFG(BaseEstimator):
         self.inside_ = {}
         self.random_state = random_state
 
+    def viterbi(self, X):
+        self._X = X
+        self.N, _ = X.shape
+        self._inside()
+        start = self.grammar.start()
+        self.viterbi_ = {}
+
+        return self._viterbi(0, self.N-1, start)
+
+    def _viterbi(self, s, t, i):
+        if s > t : raise IndexError("s should smaller than t")
+        if self.viterbi_.has_key( (s, t, i) ):
+            return self.viterbi_[(s, t, i)]
+        if s == t:
+            self.viterbi_[(s, t, i)] = self.B.get(i, -np.inf*np.ones((self.N, 1)))[s][0]
+            return self.viterbi_[(s, t, i)]
+        else:
+            maxLog = -np.inf
+            # FIXME: add backtrack for CYK
+            for prod in self.grammar.productions(lhs=i):
+                j, k = prod.rhs()
+                prob = prod.logProb()
+                for r in range(s, t):
+                    logProb = prob + self._viterbi(s, r, j) + self._viterbi(r+1, t, k)                
+                    if logProb > maxLog:
+                        maxLog = logProb
+
+            self.viterbi_[(s, t, i)] = maxLog
+                
+            return self.viterbi_[(s, t, i)]
+
     def score(self, X):
         """Compute the log probability under the model.
 
