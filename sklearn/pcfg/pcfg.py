@@ -326,9 +326,10 @@ class Terminal(object):
     """ Terminal
     A terminal is a multivariate normal distribution determined by mean and covars
     """
-    def __init__(self, means, covars):
+    def __init__(self, name, means, covars):
         self.means = means 
         self.covars = covars
+        self.name = name
 
     def sample(self):
         return sample_gaussian(self.means.ravel(), self.covars.ravel())
@@ -340,10 +341,12 @@ class Terminal(object):
         return self
 
     def __str__(self):
-        return "Gau[%s]"%np.array_str(self.means.ravel(), precision=3)
+        return "Gau_%s"%self.name
+        return "Gau%s"%np.array_str(self.means.ravel(), precision=3)
 
     def __repr__(self):
-        return "Gau[%s]"%np.array_str(self.means.ravel(), precision=3)
+        return "Gau_%s"%self.name
+        return "Gau%s"%np.array_str(self.means.ravel(), precision=3)
 
     def __hash__(self):
         means = sha1(self.means.view(np.uint8)).hexdigest()
@@ -379,14 +382,25 @@ class PCFG(BaseEstimator):
         self.inside_ = {}
         self.random_state = random_state
 
+    def tree_build(self, i, j, v):
+        #import pdb; pdb.set_trace()
+        y, z, k = self.viterbi_back[(i,j,v)]
+        if (y,z,k) == (0,0,0):
+            #return (v, i)
+            return (v, self._X[i])
+        else :
+            return (v, self.tree_build(i, k, y), self.tree_build(k+1, j, z))
+
     def viterbi(self, X):
         self._X = X
         self.N, _ = X.shape
         self._inside()
         start = self.grammar.start()
         self.viterbi_ = {}
-
-        return self._viterbi(0, self.N-1, start)
+        self.viterbi_back = {}
+        logLik = self._viterbi(0, self.N-1, start)
+        tree = self.tree_build(0, self.N-1, start)
+        return logLik, tree 
 
     def _viterbi(self, s, t, i):
         if s > t : raise IndexError("s should smaller than t")
@@ -394,9 +408,11 @@ class PCFG(BaseEstimator):
             return self.viterbi_[(s, t, i)]
         if s == t:
             self.viterbi_[(s, t, i)] = self.B.get(i, -np.inf*np.ones((self.N, 1)))[s][0]
+            self.viterbi_back[(s,t,i)] = (0,0,0)
             return self.viterbi_[(s, t, i)]
         else:
             maxLog = -np.inf
+            argmax = None
             # FIXME: add backtrack for CYK
             for prod in self.grammar.productions(lhs=i):
                 j, k = prod.rhs()
@@ -405,9 +421,10 @@ class PCFG(BaseEstimator):
                     logProb = prob + self._viterbi(s, r, j) + self._viterbi(r+1, t, k)                
                     if logProb > maxLog:
                         maxLog = logProb
+                        argmax = (j, k, r)
 
             self.viterbi_[(s, t, i)] = maxLog
-                
+            self.viterbi_back[(s,t,i)] = argmax
             return self.viterbi_[(s, t, i)]
 
     def score(self, X):
