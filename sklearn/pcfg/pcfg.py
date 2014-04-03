@@ -391,7 +391,7 @@ class PCFG(BaseEstimator):
         else :
             return (v, self.tree_build(i, k, y), self.tree_build(k+1, j, z))
 
-    def viterbi(self, X):
+    def decode(self, X):
         self._X = X
         self.N, _ = X.shape
         self._inside()
